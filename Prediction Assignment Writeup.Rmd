@@ -1,0 +1,148 @@
+---
+title: "Prediction Assignment Writeup"
+author: "Gianmarco Polotti"
+date: "26/8/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+library(corrplot)
+library(e1071)
+library(gbm)
+set.seed(132)
+knitr::opts_chunk$set(echo = TRUE)
+```
+Final report of the Peer Assessment project from Coursera’s course Practical Machine Learning.
+The goal of the project is to predict in which way 6 participants (asked to perform barbell lifts correctly and incorrectly) performe some exercises executed and monitored by some sensors. Maasurements are classified in 5 categories:
+* correct exercise (Class A)
+* Elbows to the front (Class B)
+* Lifting the dumbbell not enough (Class C)
+* Lowering the dumbbell not enough (Class D)
+* Throwing the hips in front (Class E)
+The model is applied  to a given training data with many predictors and trails and it must exactly predict 20 test conditions.
+
+## Data Import
+
+Data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+And commented in: 
+
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. “Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human ’13)”. Stuttgart, Germany: ACM SIGCHI, 2013.
+
+The first  step is loading the dataset after download.
+
+```{r load}
+training <- read.csv("pml-training.csv", header=T, na.strings=c("NA","","#DIV/0!"))
+testing  <- read.csv("pml-testing.csv", header=T, na.strings=c("NA","","#DIV/0!"))
+```
+## Data Cleaning
+
+Data rare spurious. Some missing values are present and must be removed. Moreover, the first seven column are used to identify tests and exercise, so they have to be removed. These is done in the following code.
+
+```{r clean}
+# remove identifiers
+training <- training[, -(1:7)]
+testing  <- testing[, -(1:7)]
+# remove variable with missing data
+training<-training[,colSums(is.na(training)) == 0]
+testing<-testing[,colSums(is.na(testing)) == 0]
+dim(training)
+dim(testing)
+```
+## Correlation Analysis
+
+A correlation among variables is helpfull before building the model.
+
+```{r corr}
+corMatrix <- cor(training[, -ncol(training)])
+corrplot(corMatrix, order = "FPC", method = "color", type = "lower", tl.cex = 0.8, tl.col = rgb(0, 0, 0))
+```
+
+The highly correlated variables are shown in dark colors in the graph above. They are not too many and so I can go on dealing with unchanged data.
+
+
+## Validation and Train Set Split
+
+A model selection need to be done since it is not evident which techniques is the better. So a Validation Set is build from the Training Set. As a Training set I use only 80% of the data and I suse as Validation Set the remaining 20%. Test Set remains unchanged and unused in this part.
+
+```{r split}
+inTrain  <- createDataPartition(training$classe, p=0.8, list=FALSE)
+TrainSet <- training[inTrain, ]
+ValSet  <- training[-inTrain, ]
+dim(TrainSet)
+dim(ValSet)
+```
+## Models Fitting
+
+I use three different techniques that I compare by the Confusion Matrix build on the Validation Set.
+
+## Random Forest
+
+```{r rf_mod}
+controlRF <- trainControl(method="cv", number=3, verboseIter=FALSE)
+modFitRF <- train(classe ~ ., data=TrainSet, method="rf",trControl=controlRF)
+modFitRF$finalModel
+```
+
+```{r rf_val}
+predictRF <- predict(modFitRF, newdata=ValSet)
+confMatRF <- confusionMatrix(predictRF, factor(ValSet$classe))
+confMatRF
+```
+
+## Decision Tree
+
+
+```{r dt_mod}
+modFitDT <- rpart(classe ~ ., data=TrainSet, method="class")
+fancyRpartPlot(modFitDT)
+```
+
+
+```{r dt_val}
+predictDT <- predict(modFitDT, newdata=ValSet, type="class")
+confMatDT <- confusionMatrix(predictDT, factor(ValSet$classe))
+confMatDT
+```
+## Generalized Boosted Model
+
+```{r gbm_mod}
+controlGBM <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+modFitGBM  <- train(classe ~ ., data=TrainSet, method = "gbm", trControl = controlGBM, verbose = FALSE)
+modFitGBM$finalModel
+```
+
+
+```{r gbm_val}
+predictGBM <- predict(modFitGBM, newdata=ValSet)
+confMatGBM <- confusionMatrix(predictGBM,factor(ValSet$classe))
+confMatGBM
+```
+
+
+## Results Comparison and Final Test
+
+```{r end}
+df<-data.frame(Method=c("Random Forest","Decision Tree","Generalized Boosted Model"),
+Accuracy=c(confMatRF$overall['Accuracy'],confMatDT$overall['Accuracy'],confMatGBM$overall['Accuracy']))
+
+p<-ggplot(data=df, aes(x=Method, y=Accuracy)) +
+  geom_bar(stat="identity")+coord_flip()
+p
+```
+
+Since it comes out from the comparison that the most efficient technique is the **Random Forest**, I use it to perform the final test on the 20 unknow execices.
+
+```{r test}
+predictTEST <- predict(modFitRF, newdata=testing)
+predictTEST
+```
